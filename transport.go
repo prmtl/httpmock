@@ -3,7 +3,6 @@ package httpmock
 import (
 	"errors"
 	"net/http"
-	"strings"
 )
 
 // Responders are callbacks that receive and http request and return a mocked response.
@@ -20,15 +19,15 @@ func ConnectionFailure(*http.Request) (*http.Response, error) {
 
 // NewMockTransport creates a new *MockTransport with no responders.
 func NewMockTransport() *MockTransport {
-	return &MockTransport{make(map[string]Responder), nil}
+	return &MockTransport{nil, nil}
 }
 
 // MockTransport implements http.RoundTripper, which fulfills single http requests issued by
 // an http.Client.  This implementation doesn't actually make the call, instead deferring to
 // the registered list of responders.
 type MockTransport struct {
-	responders  map[string]Responder
 	noResponder Responder
+	matchers    []*HttpMockMatcher
 }
 
 // RoundTrip receives HTTP requests and routes them to the appropriate responder.  It is required to
@@ -37,21 +36,14 @@ type MockTransport struct {
 func (m *MockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	url := req.URL.String()
 
-	// try and get a responder that matches the method and URL
-	responder := m.responderForKey(req.Method + " " + url)
-
-	// if we weren't able to find a responder and the URL contains a querystring
-	// then we strip off the querystring and try again.
-	if responder == nil && strings.Contains(url, "?") {
-		responder = m.responderForKey(req.Method + " " + strings.Split(url, "?")[0])
+	// go through matchers to match urls
+	for _, matcher := range m.matchers {
+		if matched, _ := matcher.Match(req.Method, url); matched {
+			return matcher.Respond(req)
+		}
 	}
 
-	// if we found a responder, call it
-	if responder != nil {
-		return responder(req)
-	}
-
-	// we didn't find a responder, so fire the 'no responder' responder
+	// we didn't match a url, so fire the 'no responder' responder
 	if m.noResponder == nil {
 		return ConnectionFailure(req)
 	}
@@ -61,21 +53,21 @@ func (m *MockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // do nothing with timeout
 func (m *MockTransport) CancelRequest(req *http.Request) {}
 
-// responderForKey returns a responder for a given key
-func (m *MockTransport) responderForKey(key string) Responder {
-	for k, r := range m.responders {
-		if k != key {
-			continue
-		}
-		return r
-	}
-	return nil
-}
-
 // RegisterResponder adds a new responder, associated with a given HTTP method and URL.  When a
 // request comes in that matches, the responder will be called and the response returned to the client.
+//
+// Method can be lower or upper case or special variable `ALL` that will match all methods
+//
+// Url can have multiple formats:
+//
+// - special variable `ANY` - will match any url
+// - http://www.test.com:5000/abc - will match only exact url like this (and also url ending with /)
+// - /just/path - will match all urls with this path (e.g. http://www.test.com/just/path, http://www.example.com/just/path)
+// - //www.test.com/path - will match all urls without considering protocol
 func (m *MockTransport) RegisterResponder(method, url string, responder Responder) {
-	m.responders[method+" "+url] = responder
+
+	matcher := NewMatcher(method, url, responder)
+	m.matchers = append(m.matchers, matcher)
 }
 
 // RegisterNoResponder is used to register a responder that will be called if no other responder is
@@ -86,7 +78,7 @@ func (m *MockTransport) RegisterNoResponder(responder Responder) {
 
 // Reset removes all registered responders (including the no responder) from the MockTransport
 func (m *MockTransport) Reset() {
-	m.responders = make(map[string]Responder)
+	m.matchers = []*HttpMockMatcher{}
 	m.noResponder = nil
 }
 

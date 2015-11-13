@@ -46,20 +46,20 @@ func TestMockTransport(t *testing.T) {
 func TestMockTransportReset(t *testing.T) {
 	DeactivateAndReset()
 
-	if len(DefaultTransport.responders) > 0 {
-		t.Fatal("expected no responders at this point")
+	if len(DefaultTransport.matchers) > 0 {
+		t.Fatal("expected no matchers at this point")
 	}
 
 	RegisterResponder("GET", testUrl, nil)
 
-	if len(DefaultTransport.responders) != 1 {
-		t.Fatal("expected one responder")
+	if len(DefaultTransport.matchers) != 1 {
+		t.Fatal("expected one matcher")
 	}
 
 	Reset()
 
-	if len(DefaultTransport.responders) > 0 {
-		t.Fatal("expected no responders as they were just reset")
+	if len(DefaultTransport.matchers) > 0 {
+		t.Fatal("expected no matchers as they were just reset")
 	}
 }
 
